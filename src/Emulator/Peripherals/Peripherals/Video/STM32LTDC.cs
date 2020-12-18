@@ -12,6 +12,9 @@ using Antmicro.Renode.Core.Structure.Registers;
 using System.Collections.Generic;
 using Antmicro.Renode.Peripherals.DMA;
 using Antmicro.Renode.Logging;
+using System.Drawing;
+using System.Diagnostics;
+using System;
 
 namespace Antmicro.Renode.Peripherals.Video
 {
@@ -70,6 +73,7 @@ namespace Antmicro.Renode.Peripherals.Video
                 registerMappings.Add(0x8C + offset, layer[i].WindowVerticalPositionConfigurationRegister);
                 registerMappings.Add(0x94 + offset, layer[i].PixelFormatConfigurationRegister);
                 registerMappings.Add(0x98 + offset, layer[i].ConstantAlphaConfigurationRegister);
+                registerMappings.Add(0xA0 + offset, layer[i].BlendingFactorConfigurationRegister);
                 registerMappings.Add(0xAC + offset, layer[i].ColorFrameBufferAddressRegister);
             }
 
@@ -119,9 +123,13 @@ namespace Antmicro.Renode.Peripherals.Video
                     }
                 }
 
-                blender.Blend(localLayerBuffer[0], localLayerBuffer[1], ref buffer, backgroundColor, (byte)layer[0].ConstantAlphaConfigurationRegister.Value, (byte)layer[1].ConstantAlphaConfigurationRegister.Value);
+                blender.Blend(localLayerBuffer[0], localLayerBuffer[1], 
+                    ref buffer, 
+                    backgroundColor, 
+                    (byte)layer[0].ConstantAlphaConfigurationRegister.Value, PixelBlendingMode.MULTIPLY,  // todo use bf1 and bf2 (and do it properly :D)
+                    (byte)layer[1].ConstantAlphaConfigurationRegister.Value, PixelBlendingMode.MULTIPLY);
 
-                if(lineInterruptEnableFlag.Value)
+                if (lineInterruptEnableFlag.Value)
                 {
                     IRQ.Set();
                 }
@@ -183,6 +191,18 @@ namespace Antmicro.Renode.Peripherals.Video
         private IPixelBlender blender;
         private Pixel backgroundColor;
 
+        private enum BlendingFactor1
+        {
+            CONSTANT = 0x100,
+            MULTIPLY = 0x110
+        }
+
+        private enum BlendingFactor2
+        {
+            CONSTANT = 0x101,
+            MULTIPLY = 0x111
+        }
+
         private enum Register : long
         {
             BackPorchConfigurationRegister = 0x0C,
@@ -212,6 +232,12 @@ namespace Antmicro.Renode.Peripherals.Video
                 PixelFormatField = PixelFormatConfigurationRegister.DefineEnumField<Dma2DColorMode>(0, 3, FieldMode.Read | FieldMode.Write, name: "PF", writeCallback: (_, __) => { RestoreBuffers(); video.HandlePixelFormatChange(); });
 
                 ConstantAlphaConfigurationRegister = new DoubleWordRegister(video, 0xFF).WithValueField(0, 8, FieldMode.Read | FieldMode.Write, name: "CONSTA");
+
+                BlendingFactorConfigurationRegister = new DoubleWordRegister(video, 0x0607);
+                blendingFactor1 = BlendingFactorConfigurationRegister.DefineEnumField<BlendingFactor1>(8, 3, FieldMode.Read | FieldMode.Write, name: "BF1", writeCallback: (_, __) => { RestoreBuffers(); });
+                blendingFactor2 = BlendingFactorConfigurationRegister.DefineEnumField<BlendingFactor2>(0, 3, FieldMode.Read | FieldMode.Write, name: "BF2", writeCallback: (_, __) => { 
+                    RestoreBuffers(); 
+                });
 
                 ColorFrameBufferAddressRegister = new DoubleWordRegister(video).WithValueField(0, 32, FieldMode.Read | FieldMode.Write, name: "CFBADD", writeCallback: (_, __) => WarnAboutWrongBufferConfiguration());
 
@@ -267,6 +293,7 @@ namespace Antmicro.Renode.Peripherals.Video
                     if(width != video.Width || height != video.Height)
                     {
                         video.Log(LogLevel.Warning, "Windowing is not supported yet for layer {0}.", layerId);
+                        video.Log(LogLevel.Warning, "width: {0}, height: {1} -- videoWidth: {2}, videoHeight: {3}.", width, height, video.Width, video.Height);
                     }
                 }
             }
@@ -293,6 +320,9 @@ namespace Antmicro.Renode.Peripherals.Video
             public IEnumRegisterField<Dma2DColorMode> PixelFormatField;
 
             public DoubleWordRegister ConstantAlphaConfigurationRegister;
+            public DoubleWordRegister BlendingFactorConfigurationRegister;
+            public IEnumRegisterField<BlendingFactor1> blendingFactor1;
+            public IEnumRegisterField<BlendingFactor2> blendingFactor2;
 
             public DoubleWordRegister ColorFrameBufferAddressRegister;
 
