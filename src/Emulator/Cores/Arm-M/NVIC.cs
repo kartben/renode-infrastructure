@@ -539,11 +539,11 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
                         this.NoisyLog("IRQ {0} preempts {1}.", result, activeIRQs.Peek());
                     }
                 }
-                IRQ.Set(!PRIMASK && result != SpuriousInterrupt);
 
                 if(result != SpuriousInterrupt)
                 {
                     maskedInterruptPresent.Set();
+                    IRQ.Set(!PRIMASK);
                 }
                 else
                 {
