@@ -23,6 +23,20 @@ namespace Antmicro.Renode.Backends.Display
         public byte Red   { get; private set; }
         public byte Green { get; private set; }
         public byte Blue  { get; private set; }
+
+        public override bool Equals(object obj)
+        {
+            return obj is Pixel pixel &&
+                   Alpha == pixel.Alpha &&
+                   Red == pixel.Red &&
+                   Green == pixel.Green &&
+                   Blue == pixel.Blue;
+        }
+
+        public override int GetHashCode()
+        {
+            return Alpha << 24 + Red << 16 + Green << 8 + Blue;
+        }
     }
 }
 
