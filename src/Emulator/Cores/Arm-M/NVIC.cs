@@ -29,6 +29,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
         {
             priorities = new byte[IRQCount];
             activeIRQs = new Stack<int>();
+            pendingIRQs = new HashSet<int>();
             systick = new LimitTimer(machine.ClockSource, systickFrequency, this, nameof(systick), uint.MaxValue, Direction.Descending, false, autoUpdate: true);
             this.priorityMask = priorityMask;
             irqs = new IRQState[IRQCount];
@@ -48,7 +49,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
             this.cpu = cpu;
         }
 
-        public ManualResetEvent MaskedInterruptPresent { get { return maskedInterruptPresent; } }
+        public bool MaskedInterruptPresent { get { return maskedInterruptPresent; } }
 
         public IEnumerable<int> GetEnabledExternalInterrupts()
         {
@@ -268,6 +269,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
                 priorities[i] = 0x00;
             }
             activeIRQs.Clear();
+            pendingIRQs.Clear();
             systick.Reset();
             systick.EventEnabled = false;
             systick.AutoUpdate = true;
@@ -292,6 +294,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
                 {
                     irqs[result] |= IRQState.Active;
                     irqs[result] &= ~IRQState.Pending;
+                    pendingIRQs.Remove(result);
                     this.NoisyLog("Acknowledged IRQ {0}.", result);
                     activeIRQs.Push(result);
                 }
@@ -321,6 +324,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
                 {
                     this.NoisyLog("Completed IRQ {0} active -> pending.", number);
                     irqs[number] |= IRQState.Pending;
+                    pendingIRQs.Add(number);
                 }
                 else
                 {
@@ -338,6 +342,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
                 if((irqs[number] & IRQState.Active) == 0)
                 {
                     irqs[number] |= IRQState.Pending;
+                    pendingIRQs.Add(number);
                 }
                 FindPendingInterrupt();
             }
@@ -358,6 +363,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
                     if((irqs[number] & IRQState.Active) == 0)
                     {
                         irqs[number] |= IRQState.Pending;
+                        pendingIRQs.Add(number);
                     }
                 }
                 else
@@ -489,6 +495,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
                             {
                                 this.DebugLog("Set pending IRQ {0}.", i);
                                 irqs[i] |= IRQState.Pending;
+                                pendingIRQs.Add(i);
                             }
                             else
                             {
@@ -496,6 +503,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
                                 {
                                     this.DebugLog("Cleared pending IRQ {0}.", i);
                                     irqs[i] &= ~IRQState.Pending;
+                                    pendingIRQs.Remove(i);
                                 }
                                 else
                                 {
@@ -518,7 +526,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
                 var preemptNeeded = activeIRQs.Count != 0;
                 var result = SpuriousInterrupt; // TODO (and some log?)
 
-                for(var i = 0; i < irqs.Length; i++)
+                foreach(int i in pendingIRQs)
                 {
                     var currentIRQ = irqs[i];
                     if(IsCandidate(currentIRQ, i) && priorities[i] < bestPriority)
@@ -542,12 +550,15 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
 
                 if(result != SpuriousInterrupt)
                 {
-                    maskedInterruptPresent.Set();
-                    IRQ.Set(!PRIMASK);
+                    maskedInterruptPresent = true;
+                    if(!PRIMASK)
+                    {
+                        IRQ.Set(true);
+                    }
                 }
                 else
                 {
-                    maskedInterruptPresent.Reset();
+                    maskedInterruptPresent = false;
                 }
 
                 return result;
@@ -557,7 +568,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
         private bool IsCandidate(IRQState state, int index)
         {
             var result = (state & IRQState.Pending) != 0 && (state & IRQState.Enabled) != 0 && (state & IRQState.Active) == 0;
-            if (BASEPRI != 0)
+            if (result && BASEPRI != 0)
             {
                 result &= (priorities[index] < BASEPRI);
             }
@@ -579,7 +590,7 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
         [PostDeserialization]
         private void Init()
         {
-            maskedInterruptPresent = new ManualResetEvent(false);
+            maskedInterruptPresent = false;
         }
 
         private bool primask;
@@ -588,8 +599,15 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
             get { return primask; }
             set
             {
+                if (value == primask)
+                {
+                    return;
+                }
                 primask = value;
-                FindPendingInterrupt();
+                if(!primask)
+                {
+                    FindPendingInterrupt();
+                }
             }
         }
 
@@ -599,6 +617,10 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
             get { return basepri; }
             set
             {
+                if (value == basepri)
+                {
+                    return;
+                }
                 basepri = value;
                 FindPendingInterrupt();
             }
@@ -642,10 +664,11 @@ namespace Antmicro.Renode.Peripherals.IRQControllers
         private bool countFlag;
         private byte priorityMask;
         private Stack<int> activeIRQs;
+        private HashSet<int> pendingIRQs;
         private int binaryPointPosition; // from the right
 
         [Transient]
-        private ManualResetEvent maskedInterruptPresent;
+        private bool maskedInterruptPresent;
 
         private readonly IRQState[] irqs;
         private readonly byte[] priorities;

@@ -204,7 +204,7 @@ namespace Antmicro.Renode.Peripherals.CPU
         [Export]
         private int PendingMaskedIRQ()
         {
-            return nvic.MaskedInterruptPresent.WaitOne(0) ? 1 : 0;
+            return nvic.MaskedInterruptPresent ? 1 : 0;
         }
 
 
