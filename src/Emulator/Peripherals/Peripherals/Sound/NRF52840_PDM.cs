@@ -42,20 +42,43 @@ namespace Antmicro.Renode.Peripherals.Sound
             multiplierR = 1.0;
             numberOfChannels = 2;
             sampleRatio = 64;
-            clockFrequency = 32_000_000 / 31;
+            clockFrequency = 32000000 / 31;
             SetSampleFrequency();
         }
 
-        public void SetInputFile(string fileName, Channel channel = Channel.Left)
+        public void SetInputFile(string fileName, Channel channel = Channel.Left, int repeat = 1)
         {
             switch(channel)
             {
                 case Channel.Left:
+                {
+                    if(decoderLeft == null)
+                    {
+                        decoderLeft = new PCMDecoder(16, sampleFrequency, 1, false, this);
+                    }
+
+                    for(var i = 0; i < repeat; i++)
+                    {
+                        decoderLeft.LoadFile(fileName);
+                    }
                     inputFileLeft = fileName;
-                    break;
+                }
+                break;
+
                 case Channel.Right:
+                {
+                    if(decoderRight == null)
+                    {
+                        decoderRight = new PCMDecoder(16, sampleFrequency, 1, false, this);
+                    }
+
+                    for(var i = 0; i < repeat; i++)
+                    {
+                        decoderRight.LoadFile(fileName);
+                    }
                     inputFileRight = fileName;
-                    break;
+                }
+                break;
             }
         }
 
@@ -89,15 +112,6 @@ namespace Antmicro.Renode.Peripherals.Sound
             {
                 this.Log(LogLevel.Error, "Trying to start reception with not enough input files - please set input using `SetinputFile`. Aborting.");
                 return;
-            }
-            
-            decoderLeft = new PCMDecoder(16, sampleFrequency, 1, false, this);
-            decoderLeft.LoadFile(inputFileLeft);
-            
-            if(numberOfChannels == 2)
-            {
-                decoderRight = new PCMDecoder(16, sampleFrequency, 1, false, this);
-                decoderRight.LoadFile(inputFileRight);
             }
             
             StartPDMThread();
@@ -142,25 +156,6 @@ namespace Antmicro.Renode.Peripherals.Sound
            return true;
         }
 
-        private uint AmplifySample(uint sample, double multiplier)
-        {
-            // Multiplication with saturation on s16le samples
-            // Input samples are little endian, hence bytes swap before and after arithmetics
-            var intValue = (short)(Misc.SwapBytes((ushort)sample));
-            var result = (int)(intValue * multiplier);
-
-            if(result > Int16.MaxValue)
-            {
-                result = Int16.MaxValue;
-            }
-            else if(result < Int16.MinValue)
-            {
-                result = Int16.MinValue;
-            }
-
-            return (uint)Misc.SwapBytes((ushort)result);
-        }
-
         private void InputSamples()
         {
             var currentPointer = samplePtr.Value;
@@ -174,13 +169,12 @@ namespace Antmicro.Renode.Peripherals.Sound
             switch(numberOfChannels)
             {
                 case 1:
-                    var samples = decoderLeft.GetSamplesByCount(samplesCount)
-                                             .Select(i => AmplifySample(i, multiplierL));
+                    var samples = decoderLeft.GetSamplesByCount(samplesCount);
 
                     var index = 1u;
-                    var prev = 0u;
+                    ushort prev = 0;
                     
-                    foreach(uint sample in samples)
+                    foreach(ushort sample in samples)
                     {
                         if(index % 2 != 0)
                         {
@@ -189,7 +183,7 @@ namespace Antmicro.Renode.Peripherals.Sound
                         else
                         {
                             // Assuming input file format of s16le
-                            preparedDoubleWords[(index / 2) - 1] = (sample << 16) | prev;
+                            preparedDoubleWords[(index / 2) - 1] = (uint)((Misc.SwapBytes(sample) << 16) | Misc.SwapBytes(prev));
                         }
                         index++;
                     }
@@ -197,18 +191,13 @@ namespace Antmicro.Renode.Peripherals.Sound
                     if(index % 2 == 0)
                     {
                         // One sample left
-                        preparedDoubleWords[(index / 2) -1] = prev;
+                        preparedDoubleWords[(index / 2) - 1] = prev;
                     }
                     
                     break;
                 case 2:
-                    var samplesLeft  = decoderLeft.GetSamplesByCount(samplesCount / 2)
-                                                  .Select(i => AmplifySample(i, multiplierL))
-                                                  .ToArray();
-                    
-                    var samplesRight = decoderRight.GetSamplesByCount(samplesCount / 2)
-                                                   .Select(i => AmplifySample(i, multiplierR))
-                                                   .ToArray();
+                    var samplesLeft  = decoderLeft.GetSamplesByCount(samplesCount / 2).ToArray();
+                    var samplesRight = decoderRight.GetSamplesByCount(samplesCount / 2).ToArray();
                                                    
                     if(samplesLeft.Length != samplesRight.Length)
                     {
@@ -225,8 +214,8 @@ namespace Antmicro.Renode.Peripherals.Sound
 
                     for(var i = 0; i < samplesLeft.Length; i++)
                     {
-                        var right = samplesRight[i];
-                        var left  = samplesLeft[i];
+                        var right = (uint)Misc.SwapBytes((ushort)samplesRight[i]);
+                        var left  = (uint)Misc.SwapBytes((ushort)samplesLeft[i]);
 
                         preparedDoubleWords[i] = (right << 16) | left;
                     }
@@ -270,22 +259,22 @@ namespace Antmicro.Renode.Peripherals.Sound
             switch(frequency)
             {
                 case ClockFrequency.f1000K:
-                    clockFrequency = 32_000_000 / 32;
+                    clockFrequency = 32000000 / 32;
                     break;
                 case ClockFrequency.Default:
-                    clockFrequency = 32_000_000 / 31;
+                    clockFrequency = 32000000 / 31;
                     break;
                 case ClockFrequency.f1067K:
-                    clockFrequency = 32_000_000 / 30;
+                    clockFrequency = 32000000 / 30;
                     break;
                 case ClockFrequency.f1231K:
-                    clockFrequency = 32_000_000 / 26;
+                    clockFrequency = 32000000 / 26;
                     break;
                 case ClockFrequency.f1280K:
-                    clockFrequency = 32_000_000 / 25;
+                    clockFrequency = 32000000 / 25;
                     break;
                 case ClockFrequency.f1333K:
-                    clockFrequency = 32_000_000 / 24;
+                    clockFrequency = 32000000 / 24;
                     break;
                 default:
                     this.Log(LogLevel.Error, "Wrong PDMCLKCTRL value, settting to default value");
